@@ -66,7 +66,7 @@ export interface Verdict {
 	degenerate_warning?: string;
 	/** 被整层复核降级为串行的层及原因 */
 	demoted_layers?: Array<{ subtasks: string[]; p_safe: number }>;
-	jev: { ok: boolean; latency_ms?: number; batches?: number; usage?: unknown; error?: string };
+	jev: { ok: boolean; latency_ms?: number; batches?: number; usage?: unknown; error?: string; layer_check?: "ok" | "failed" | "skipped" };
 }
 
 export type JevFn = (state: string, questions: Record<string, NoulQuestion>) => Promise<JevResult>;
@@ -88,6 +88,8 @@ export function validateInput(input: GateInput): string[] {
 			continue;
 		}
 		if (ids.has(s.id)) errors.push(`duplicate subtask id: "${s.id}"`);
+		if (!/^[A-Za-z0-9_-]+$/.test(s.id))
+			errors.push(`subtask id "${s.id}" must match /^[A-Za-z0-9_-]+$/ (ids are embedded in question keys; ":" would collide)`);
 		ids.add(s.id);
 		if (!s.title || !s.detail) errors.push(`subtask "${s.id}" missing title/detail`);
 		const hasReads = Array.isArray(s.reads);
@@ -323,6 +325,13 @@ export async function runGate(input: GateInput, opts: RunGateOptions = {}): Prom
 					.filter(Boolean)
 					.join("\n\n");
 				const result = await opts.jev(state, Object.fromEntries(layerQuestions));
+				jevStatus = {
+					...jevStatus,
+					layer_check: "ok",
+					latency_ms: (jevStatus.latency_ms ?? 0) + result.latencyMs,
+					batches: (jevStatus.batches ?? 0) + result.batches,
+					usage: result.usage,
+				};
 				for (const [key, p] of Object.entries(result.probabilities)) {
 					const idx = layerIndex.get(key);
 					if (idx !== undefined && p < th.layerVeto) {
@@ -330,8 +339,14 @@ export async function runGate(input: GateInput, opts: RunGateOptions = {}): Prom
 						demoted.push({ subtasks: rawLayers[idx], p_safe: p });
 					}
 				}
-			} catch {
-				// 整层复核失败不降级 verdict：成对判定仍然有效
+			} catch (error) {
+				// 成对判定有效但整层复核失败：verdict 必须显式标注 n 元安全网没跑过，
+				// 不能让主模型以为完整 Jev 覆盖（fail-closed 的信息义务）。
+				jevStatus = {
+					...jevStatus,
+					layer_check: "failed",
+					error: `layer recheck failed: ${error instanceof Error ? error.message : String(error)}`,
+				};
 			}
 		}
 	}

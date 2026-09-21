@@ -94,6 +94,9 @@ function formatSummary(v: Verdict): string {
 			...v.demoted_layers.map((d) => `  [${d.subtasks.join(", ")}] p_safe=${d.p_safe.toFixed(2)}`),
 		);
 	}
+	if (v.jev.ok && v.jev.layer_check === "failed") {
+		lines.push(`⚠ Whole-layer recheck failed (${v.jev.error}) — pair judgments are valid, but the n-ary safety net did not run.`);
+	}
 	if (v.degenerate_warning) lines.push(`⚠ ${v.degenerate_warning}`);
 	if (v.jev.ok) lines.push(`Jev: ${v.jev.batches} batch(es), ${v.jev.latency_ms}ms`);
 	return lines.join("\n");

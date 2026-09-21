@@ -179,3 +179,51 @@ test("runGate: 全塌缩 + 有 uncertain → degenerate 告警", async () => {
 	assert.equal(v.topology, "sequential");
 	assert.match(v.degenerate_warning ?? "", /collapsed/);
 });
+
+test("validateInput: id 含冒号/空格等字符 → 拒绝（防 pairKey 碰撞）", () => {
+	const input: GateInput = {
+		goal: "g",
+		subtasks: [
+			{ id: "a:b", title: "t", detail: "d", ...baseSub },
+			{ id: "c", title: "t", detail: "d", ...baseSub },
+		],
+	};
+	assert.ok(validateInput(input).some((e) => e.includes("[A-Za-z0-9_-]")));
+});
+
+test("runGate: 成对成功但整层复核抛错 → layer_check=failed 显式标注", async () => {
+	let call = 0;
+	const jev: JevFn = async (_s, questions) => {
+		call++;
+		if (Object.keys(questions).some((k) => k.startsWith("layer:"))) throw new Error("529 overloaded");
+		return {
+			probabilities: Object.fromEntries(Object.keys(questions).map((k) => [k, 0.95])),
+			usage: {},
+			latencyMs: 1,
+			batches: 1,
+		};
+	};
+	const v = await runGate(threeWay, { jev });
+	assert.equal(v.jev.ok, true);
+	assert.equal(v.jev.layer_check, "failed");
+	assert.match(v.jev.error ?? "", /529/);
+	assert.ok(call >= 2);
+});
+
+test("runGate: 降级模式 verdict 形状（layers 空、硬边保留）", async () => {
+	const input: GateInput = {
+		goal: "g",
+		subtasks: [
+			{ id: "a", title: "t", detail: "d", reads: [], writes: ["src/**"] },
+			{ id: "b", title: "t", detail: "d", reads: ["src/x.ts"], writes: [] },
+		],
+	};
+	const badJev: JevFn = async () => {
+		throw new Error("no key");
+	};
+	const v = await runGate(input, { jev: badJev });
+	assert.equal(v.topology, "unknown");
+	assert.deepEqual(v.layers, []);
+	assert.equal(v.edges.length, 1);
+	assert.equal(v.edges[0].reason, "scope-overlap");
+});

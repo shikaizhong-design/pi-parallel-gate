@@ -13,6 +13,7 @@ const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const MODEL = "jev-latest";
 const BATCH_SIZE = 20;
 const PER_REQUEST_TIMEOUT_MS = 15_000;
+const OVERALL_DEADLINE_MS = 15_000; // 设计约定：总超时 15s（含重试与退避）
 const MAX_RETRIES = 3;
 
 export interface NoulQuestion {
@@ -38,6 +39,8 @@ export class JevError extends Error {
 	constructor(
 		message: string,
 		readonly status?: number,
+		/** fatal=true：客户端侧确定性错误（响应损坏等），重试无意义 */
+		readonly fatal = false,
 	) {
 		super(message);
 		this.name = "JevError";
@@ -50,6 +53,7 @@ async function postBatch(
 	apiKey: string,
 	state: string,
 	questions: Record<string, NoulQuestion>,
+	deadline: number,
 ): Promise<{ answers: Record<string, number>; usage: JevUsage }> {
 	const body = {
 		state,
@@ -63,7 +67,12 @@ async function postBatch(
 	};
 	let lastError: Error | undefined;
 	for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-		if (attempt > 0) await sleep(1000 * 2 ** (attempt - 1)); // 1s, 2s
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) {
+			lastError = new JevError("TypeSafe overall deadline exceeded");
+			break;
+		}
+		if (attempt > 0) await sleep(Math.min(1000 * 2 ** (attempt - 1), Math.max(0, deadline - Date.now()))); // 1s, 2s（截到 deadline）
 		try {
 			const res = await fetch(ENDPOINT, {
 				method: "POST",
@@ -72,7 +81,7 @@ async function postBatch(
 					"Content-Type": "application/json",
 				},
 				body: JSON.stringify(body),
-				signal: AbortSignal.timeout(PER_REQUEST_TIMEOUT_MS),
+				signal: AbortSignal.timeout(Math.min(PER_REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now()))),
 			});
 			if (res.status === 429 || res.status === 529) {
 				lastError = new JevError(`TypeSafe ${res.status}`, res.status);
@@ -89,16 +98,22 @@ async function postBatch(
 			};
 			const answers: Record<string, number> = {};
 			for (const [id, ans] of Object.entries(data.answers ?? {})) {
-				if (typeof ans?.noul === "number") answers[id] = ans.noul;
+				if (typeof ans?.noul === "number") {
+					// fail-closed：NaN 或越界概率视为响应损坏 → 抛错走降级，绝不放行
+					if (!Number.isFinite(ans.noul) || ans.noul < 0 || ans.noul > 1) {
+						throw new JevError(`TypeSafe returned invalid noul for "${id}": ${ans.noul}`, undefined, true);
+					}
+					answers[id] = ans.noul;
+				}
 			}
 			const missing = Object.keys(questions).filter((id) => !(id in answers));
 			if (missing.length > 0) {
-				throw new JevError(`TypeSafe response missing answers for: ${missing.join(", ")}`);
+				throw new JevError(`TypeSafe response missing answers for: ${missing.join(", ")}`, undefined, true);
 			}
 			return { answers, usage: data.usage ?? {} };
 		} catch (error) {
-			if (error instanceof JevError && error.status && error.status < 500 && error.status !== 429) {
-				throw error; // 客户端错误不重试
+			if (error instanceof JevError && (error.fatal || (error.status && error.status < 500 && error.status !== 429))) {
+				throw error; // 确定性错误 / 客户端错误不重试
 			}
 			lastError = error instanceof Error ? error : new Error(String(error));
 		}
@@ -118,7 +133,8 @@ export async function evaluateNoul(
 		batches.push(Object.fromEntries(entries.slice(i, i + BATCH_SIZE)));
 	}
 	const start = Date.now();
-	const results = await Promise.all(batches.map((b) => postBatch(apiKey, state, b)));
+	const deadline = start + OVERALL_DEADLINE_MS;
+	const results = await Promise.all(batches.map((b) => postBatch(apiKey, state, b, deadline)));
 	const probabilities: Record<string, number> = {};
 	const usage: JevUsage = { input_tokens: 0, output_tokens: 0 };
 	for (const r of results) {
