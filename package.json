@@ -1,0 +1,27 @@
+{
+	"name": "pi-parallel-gate",
+	"version": "0.1.0",
+	"description": "Judgment gate for pi: verify proposed subtasks are safe to parallelize (Jev + deterministic scope checks) before dispatching subagents",
+	"type": "module",
+	"license": "MIT",
+	"files": ["src", "docs", "README.md", "LICENSE"],
+	"scripts": {
+		"test": "tsx --test test/*.test.ts",
+		"smoke": "tsx scripts/smoke.ts",
+		"typecheck": "tsc --noEmit"
+	},
+	"keywords": ["pi-package", "pi-extension", "multi-agent", "parallel", "jev", "typesafe"],
+	"pi": {
+		"extensions": ["./src/index.ts"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@sinclair/typebox": "*",
+		"@types/node": "*",
+		"tsx": "*",
+		"typescript": "*"
+	}
+}
