@@ -283,23 +283,35 @@ export async function runGate(input: GateInput, opts: RunGateOptions = {}): Prom
 		};
 	}
 
-	// Layer 2：分层。声明依赖保留真实方向；无向冲突边（只表达「不能同层」）
-	// 按 id 序定方向作为拓扑占位。方向互相矛盾时 Kahn 检出成环。
+	// Layer 2：分层。有向图只含声明依赖（真实先后）；无向冲突边（只表达「不能同层」）
+	// 不进有向图——词序假方向会和合法声明依赖构成假环（例：a←c、b←a、b×c 冲突，
+	// 合法调度 c→a→b 会被词序边 b→c 误判成环）。冲突约束在分层后做层内贪心拆分。
 	const declared = edges.filter((e) => e.reason === "declared").map((e) => ({ a: e.a, b: e.b }));
-	const nonDeclared = edges.filter((e) => e.reason !== "declared");
-	const graphEdges = [
-		...declared,
-		...nonDeclared
-			.filter((e) => !declared.some((d) => (d.a === e.a && d.b === e.b) || (d.a === e.b && d.b === e.a)))
-			.map((e) => ({ a: e.a < e.b ? e.a : e.b, b: e.a < e.b ? e.b : e.a })),
-	];
-	const { layers: rawLayers, cycle } = kahnLayers(ids, graphEdges);
+	const { layers: orderedLayers, cycle } = kahnLayers(ids, declared);
 	if (cycle.length > 0) {
 		throw new Error(
 			`parallel_gate: dependency cycle detected involving: ${cycle.join(", ")}. ` +
-				`Fix depends_on declarations (a declared dependency contradicts other constraints) and call again.`,
+				`Fix depends_on declarations and call again.`,
 		);
 	}
+	// 无向冲突对集合（软边 + 非声明硬边）
+	const conflictPairs = new Set(
+		edges
+			.filter((e) => e.reason !== "declared")
+			.map((e) => (e.a < e.b ? `${e.a}|${e.b}` : `${e.b}|${e.a}`)),
+	);
+	const inConflict = (x: string, y: string) =>
+		conflictPairs.has(x < y ? `${x}|${y}` : `${y}|${x}`);
+	// 层内拆分：同层任务两两无冲突才共享子层（贪心装箱，保持原层顺序）
+	const rawLayers: string[][] = orderedLayers.flatMap((layer) => {
+		const bins: string[][] = [];
+		for (const id of layer) {
+			const bin = bins.find((b) => b.every((member) => !inConflict(member, id)));
+			if (bin) bin.push(id);
+			else bins.push([id]);
+		}
+		return bins;
+	});
 
 	// Layer 3：整层复核（仅多人层）；先收集降级结果，最后一次性重建 layers，
 	// 避免边遍历边 splice 的索引漂移。
@@ -347,13 +359,16 @@ export async function runGate(input: GateInput, opts: RunGateOptions = {}): Prom
 					}
 				}
 			} catch (error) {
-				// 成对判定有效但整层复核失败：verdict 必须显式标注 n 元安全网没跑过，
-				// 不能让主模型以为完整 Jev 覆盖（fail-closed 的信息义务）。
+				// 成对判定有效但整层复核失败：fail-closed——n 元安全网没跑过的多人层
+				// 一律降级为单人层，绝不让「复核失败的组」以并行层身份流出。
 				jevStatus = {
 					...jevStatus,
 					layer_check: "failed",
 					error: `layer recheck failed: ${error instanceof Error ? error.message : String(error)}`,
 				};
+				rawLayers.forEach((layer, idx) => {
+					if (layer.length > 1) demotedIdx.add(idx);
+				});
 			}
 		}
 	}

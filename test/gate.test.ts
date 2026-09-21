@@ -208,6 +208,8 @@ test("runGate: 成对成功但整层复核抛错 → layer_check=failed 显式�
 	assert.equal(v.jev.layer_check, "failed");
 	assert.match(v.jev.error ?? "", /529/);
 	assert.ok(call >= 2);
+	// fail-closed：复核失败的 verdict 不得含任何多人层
+	assert.ok(v.layers.every((l) => l.length === 1));
 });
 
 test("runGate: 整层复核响应缺 layer 答案 → layer_check=failed（fail-closed）", async () => {
@@ -245,4 +247,35 @@ test("runGate: 降级模式 verdict 形状（layers 空、硬边保留）", asyn
 	assert.deepEqual(v.layers, []);
 	assert.equal(v.edges.length, 1);
 	assert.equal(v.edges[0].reason, "scope-overlap");
+});
+
+test("runGate: 无向冲突边不制造假环（回归：c→a→b 合法调度不得误判 cycle）", async () => {
+	// a depends_on c；b depends_on a；b 与 c 有 scope 冲突。
+	// 旧实现把冲突边按词序定向（b→c），与 c→a、a→b 构成假环；正确调度是 c→a→b。
+	const input: GateInput = {
+		goal: "g",
+		subtasks: [
+			{ id: "a", title: "t", detail: "d", reads: [], writes: ["src/a.ts"], depends_on: ["c"] },
+			{ id: "b", title: "t", detail: "d", reads: [], writes: ["src/**"], depends_on: ["a"] },
+			{ id: "c", title: "t", detail: "d", reads: [], writes: ["src/c.ts"] },
+		],
+	};
+	const v = await runGate(input, { jev: mockJev({}) });
+	assert.equal(v.topology, "sequential");
+	assert.deepEqual(v.layers, [["c"], ["a"], ["b"]]);
+});
+
+test("runGate: 同层冲突对拆到不同子层，不冲突的保持同层", async () => {
+	// a×b scope 冲突、与 c 都无冲突 → [[a, c], [b]]（贪心保持原顺序）
+	const input: GateInput = {
+		goal: "g",
+		subtasks: [
+			{ id: "a", title: "t", detail: "d", reads: [], writes: ["src/a.ts"] },
+			{ id: "b", title: "t", detail: "d", reads: ["src/a.ts"], writes: [] },
+			{ id: "c", title: "t", detail: "d", reads: [], writes: ["docs/c.md"] },
+		],
+	};
+	const v = await runGate(input, { jev: mockJev({ "layer:0": 0.95 }) });
+	assert.deepEqual(v.layers, [["a", "c"], ["b"]]);
+	assert.equal(v.topology, "pipeline");
 });
