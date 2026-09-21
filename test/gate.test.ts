@@ -210,6 +210,25 @@ test("runGate: 成对成功但整层复核抛错 → layer_check=failed 显式�
 	assert.ok(call >= 2);
 });
 
+test("runGate: 整层复核响应缺 layer 答案 → layer_check=failed（fail-closed）", async () => {
+	const jev: JevFn = async (_s, questions) => {
+		const keys = Object.keys(questions);
+		if (keys.some((k) => k.startsWith("layer:"))) {
+			return { probabilities: {}, usage: {}, latencyMs: 1, batches: 1 }; // 部分响应：无 layer 答案
+		}
+		return {
+			probabilities: Object.fromEntries(keys.map((k) => [k, 0.95])),
+			usage: {},
+			latencyMs: 1,
+			batches: 1,
+		};
+	};
+	const v = await runGate(threeWay, { jev });
+	assert.equal(v.jev.ok, true);
+	assert.equal(v.jev.layer_check, "failed");
+	assert.match(v.jev.error ?? "", /missing\/invalid layer answer/);
+});
+
 test("runGate: 降级模式 verdict 形状（layers 空、硬边保留）", async () => {
 	const input: GateInput = {
 		goal: "g",

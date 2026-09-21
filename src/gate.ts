@@ -250,7 +250,7 @@ export async function runGate(input: GateInput, opts: RunGateOptions = {}): Prom
 			jevStatus = { ok: true, latency_ms: result.latencyMs, batches: result.batches, usage: result.usage };
 			for (const [key, [A, B]] of questionPairs) {
 				const p = result.probabilities[key];
-				if (p === undefined) throw new Error(`missing probability for ${key}`);
+				if (!Number.isFinite(p) || p < 0 || p > 1) throw new Error(`missing/invalid probability for ${key}: ${p}`);
 				const override = pairOverride(A.id, B.id);
 				if (p <= th.veto) {
 					edges.push({ a: A.id, b: B.id, kind: "hard", reason: "jev-veto", p_safe: p });
@@ -325,6 +325,13 @@ export async function runGate(input: GateInput, opts: RunGateOptions = {}): Prom
 					.filter(Boolean)
 					.join("\n\n");
 				const result = await opts.jev(state, Object.fromEntries(layerQuestions));
+				// fail-closed：每个 layer:* 键必须有有限 [0,1] 概率，缺失/越界视为复核失败
+				for (const key of layerIndex.keys()) {
+					const p = result.probabilities[key];
+					if (!Number.isFinite(p) || p < 0 || p > 1) {
+						throw new Error(`missing/invalid layer answer for "${key}": ${p}`);
+					}
+				}
 				jevStatus = {
 					...jevStatus,
 					layer_check: "ok",
