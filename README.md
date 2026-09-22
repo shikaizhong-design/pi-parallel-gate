@@ -112,4 +112,4 @@ MIT
 ## Trigger it yourself
 
 - `/gate <task>` or `/闸门 <task>` — decomposes the task, runs the gate, reports the verdict, then dispatches by layers. (Commands are interactive-mode only; in `-p` print mode just say "先过 parallel_gate 再并行".)
-- Or simply say "先过 parallel_gate 再并行" / "过闸" in any session.
+- Or just put a trigger phrase in your prompt: 「过闸：…」, 「并行闸门」, 「先判定再并行」 — the agent will decompose and call parallel_gate before doing any work.

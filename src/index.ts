@@ -142,6 +142,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Verify a proposed subtask split is safe to parallelize before dispatching subagents",
 		promptGuidelines: [
 			"Call parallel_gate before dispatching 2+ subagents in parallel when any of them writes files.",
+			"When the user's message contains 「过闸」, 「并行闸门」, 「先判定再并行」, or \"parallel gate\", treat it as an explicit command to decompose the task into subtasks and call parallel_gate before doing any work.",
 			"Declare every subtask's reads[]/writes[] globs honestly — the deterministic conflict check and the judgment model both depend on them; pass writes: [] for read-only subtasks.",
 			"Dispatch strictly by parallel_gate verdict.layers: subtasks in the same layer may run in parallel, later layers must wait; never put a hard-edged pair in the same parallel batch.",
 			"When parallel_gate returns uncertain_pairs, either refine the subtask detail/scope and call again, or pass overrides to confirm pairs you have verified safe yourself.",
