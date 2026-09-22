@@ -108,3 +108,8 @@ npm run smoke   # live end-to-end against the real TypeSafe API (needs TYPESAFE_
 ## License
 
 MIT
+
+## Trigger it yourself
+
+- `/gate <task>` or `/闸门 <task>` — decomposes the task, runs the gate, reports the verdict, then dispatches by layers. (Commands are interactive-mode only; in `-p` print mode just say "先过 parallel_gate 再并行".)
+- Or simply say "先过 parallel_gate 再并行" / "过闸" in any session.

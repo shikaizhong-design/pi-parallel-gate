@@ -103,6 +103,34 @@ function formatSummary(v: Verdict): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	// 主动触发命令：/gate <任务> 或 /闸门 <任务>
+	// 让主模型先拆任务、过 parallel_gate 出 verdict，再按 layers 派活。
+	const gateHandler = async (args: string) => {
+		const task = args?.trim();
+		if (!task) return; // 无参数时让用户在输入框里看到 usage（description 已说明）
+		pi.sendMessage(
+			{
+				customType: "parallel-gate-trigger",
+				content: [
+					`用户通过 /gate 主动触发并行闸门。任务：${task}`,
+					`请先把该任务拆解为子任务（每个子任务必须声明 reads[]/writes[]，只读的写 writes: []，有先后关系的写 depends_on[]），`,
+					`然后调用 parallel_gate 工具获取 verdict，向用户汇报 topology、layers、edges 摘要，`,
+					`最后严格按 verdict.layers 派 subagent 执行（同层并行、跨层等待；硬边对不得同批）。`,
+				].join(""),
+				display: true,
+			},
+			{ triggerTurn: true },
+		);
+	};
+	pi.registerCommand("gate", {
+		description: "并行闸门：拆解任务 → parallel_gate 判定 → 按 layers 派 subagent。用法：/gate <任务描述>",
+		handler: gateHandler,
+	});
+	pi.registerCommand("闸门", {
+		description: "并行闸门（中文别名，同 /gate）：/闸门 <任务描述>",
+		handler: gateHandler,
+	});
+
 	pi.registerTool({
 		name: "parallel_gate",
 		label: "Parallel Gate",
