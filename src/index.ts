@@ -143,6 +143,8 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Call parallel_gate before dispatching 2+ subagents in parallel when any of them writes files.",
 			"When the user's message contains 「过闸」, 「并行闸门」, 「先判定再并行」, or \"parallel gate\", treat it as an explicit command to decompose the task into subtasks and call parallel_gate before doing any work.",
+			"If a taskflow plan exists, reuse its steps as the subtask list when calling parallel_gate — do not invent a second decomposition; add the missing reads[]/writes[]/depends_on[] fields per step.",
+			"After a parallel_gate verdict, if you maintain a taskflow plan, re-issue it with stage set per layer (e.g. stage \"L0 并行批\" for every step in layer 0) so the panel shows parallel batches as groups.",
 			"Declare every subtask's reads[]/writes[] globs honestly — the deterministic conflict check and the judgment model both depend on them; pass writes: [] for read-only subtasks.",
 			"Dispatch strictly by parallel_gate verdict.layers: subtasks in the same layer may run in parallel, later layers must wait; never put a hard-edged pair in the same parallel batch.",
 			"When parallel_gate returns uncertain_pairs, either refine the subtask detail/scope and call again, or pass overrides to confirm pairs you have verified safe yourself.",
